@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gateway Dashboard</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png?v=gateway-dashboard" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png?v=gateway-dashboard" />
+    <link rel="shortcut icon" href="/favicon.ico?v=gateway-dashboard" />
+    <link rel="apple-touch-icon" href="/static/app-icon.png?v=gateway-dashboard" />
+    <link rel="stylesheet" href="/static/styles.css?v=video-controls-v1" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-mark" src="/static/app-icon.png" alt="" />
+          <div>
+            <h1>Gateway Dashboard</h1>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="nav-button active" data-view="explorer">Explorer</button>
+          <button class="nav-button" data-view="logs">Logs</button>
+        </nav>
+      </aside>
+
+      <main class="main">
+        <section id="authView" class="auth-view hidden">
+          <form id="authForm" class="auth-panel">
+            <img class="auth-logo" src="/static/app-icon.png" alt="" />
+            <h2 id="authTitle">Login</h2>
+            <p id="authCopy">Enter the dashboard password for this browser session.</p>
+            <label>
+              Password
+              <input id="passwordInput" type="password" autocomplete="current-password" minlength="10" required />
+            </label>
+            <label class="check-row">
+              <input id="rememberInput" type="checkbox" />
+              Remember this browser
+            </label>
+            <button type="submit" class="primary-button">Continue</button>
+            <p id="authError" class="form-error"></p>
+          </form>
+        </section>
+
+        <section id="explorerView" class="view">
+          <header class="toolbar">
+            <div>
+              <h2>Drive Overview</h2>
+              <p>Browse PC drives over Tailscale without opening Remote Desktop.</p>
+            </div>
+            <div class="toolbar-actions">
+              <button id="refreshButton" class="tool-button">Refresh</button>
+              <button id="logoutButton" class="tool-button">Logout</button>
+            </div>
+          </header>
+
+          <div id="driveGrid" class="drive-grid"></div>
+
+          <div class="workspace-grid">
+            <section class="panel explorer-panel">
+              <div class="panel-header">
+                <div>
+                  <h3>Explorer</h3>
+                  <p id="currentPath">Select a drive</p>
+                </div>
+                <div class="explorer-controls">
+                  <button id="backButton" class="icon-button" title="Up one folder" aria-label="Up one folder" disabled>&larr;</button>
+                  <button id="forwardButton" class="icon-button" title="Open selected folder" aria-label="Open selected folder" disabled>&rarr;</button>
+                </div>
+              </div>
+              <div id="treeList" class="tree-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="logsView" class="view hidden">
+          <header class="toolbar">
+            <div>
+              <h2>Operation Log</h2>
+              <p>Authentication and filesystem actions are written as JSONL on the PC.</p>
+            </div>
+            <button id="refreshLogsButton" class="tool-button">Refresh</button>
+          </header>
+          <div id="logList" class="log-list"></div>
+        </section>
+
+      </main>
+    </div>
+
+    <div id="contextMenu" class="context-menu hidden" role="menu" aria-label="File actions">
+      <div id="contextPreview" class="context-preview hidden"></div>
+      <button type="button" role="menuitem" data-context-action="preview">Open in dashboard</button>
+      <button type="button" role="menuitem" data-context-action="open">Open on PC</button>
+      <button type="button" role="menuitem" data-context-action="copy-windows">Copy Windows path</button>
+      <button type="button" role="menuitem" data-context-action="copy-ssh">Copy SSH path</button>
+      <button type="button" role="menuitem" data-context-action="copy-posix">Copy POSIX path</button>
+      <button type="button" role="menuitem" data-context-action="copy-name">Copy name</button>
+    </div>
+    <div id="previewOverlay" class="preview-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
+      <section class="preview-shell">
+        <header class="preview-header">
+          <div>
+            <h3 id="previewTitle">Preview</h3>
+            <p id="previewPath"></p>
+          </div>
+          <div class="preview-header-actions">
+            <button id="previewActionsButton" class="icon-button preview-actions-button" type="button" title="Actions" aria-label="Preview actions">...</button>
+            <button id="previewCloseButton" class="tool-button" type="button">Close</button>
+          </div>
+        </header>
+        <div class="preview-stage">
+          <button id="previewPreviousButton" class="preview-nav preview-nav-previous" type="button" aria-label="Previous file" disabled>&larr;</button>
+          <div id="previewBody" class="preview-body"></div>
+          <button id="previewNextButton" class="preview-nav preview-nav-next" type="button" aria-label="Next file" disabled>&rarr;</button>
+        </div>
+      </section>
+    </div>
+    <div id="toast" class="toast hidden"></div>
+    <script src="/static/app.js?v=video-controls-v1"></script>
+  </body>
+</html>

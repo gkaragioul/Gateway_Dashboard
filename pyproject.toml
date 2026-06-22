@@ -1,0 +1,27 @@
+[project]
+name = "gateway-dashboard"
+version = "0.9.0"
+description = "Self-hosted private-network dashboard for browsing a Windows storage PC."
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic>=2",
+]
+
+keywords = ["dashboard", "tailscale", "windows", "filesystem", "self-hosted"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+  "Topic :: System :: Filesystems",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
