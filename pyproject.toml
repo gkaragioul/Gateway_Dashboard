@@ -1,6 +1,6 @@
 [project]
 name = "gateway-dashboard"
-version = "0.9.4"
+version = "0.9.5"
 description = "Self-hosted private-network dashboard for browsing a Windows storage PC."
 requires-python = ">=3.11"
 readme = "README.md"

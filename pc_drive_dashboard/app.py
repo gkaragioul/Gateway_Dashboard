@@ -54,7 +54,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings.ensure_dirs()
     store = SecurityStore(resolved_settings.config_path)
     audit = AuditLog(resolved_settings.log_dir)
-    app = FastAPI(title="Gateway Dashboard", version="0.9.4")
+    app = FastAPI(title="Gateway Dashboard", version="0.9.5")
     static_dir = Path(__file__).parent / "static"
 
     app.state.settings = resolved_settings

@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $AppDir = Join-Path $BaseDir "app"
 $PythonExe = Join-Path $AppDir ".venv\Scripts\python.exe"
 $RunnerScript = Join-Path $AppDir "scripts\run_windows_dashboard.ps1"
+$LauncherScript = Join-Path $AppDir "scripts\run_windows_dashboard_hidden.vbs"
 
 if (!(Test-Path -LiteralPath $PythonExe)) {
     throw "Dashboard Python executable not found: $PythonExe"
@@ -19,8 +20,16 @@ if (!(Test-Path -LiteralPath $RunnerScript)) {
     throw "Dashboard runner script not found: $RunnerScript"
 }
 
-$arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$RunnerScript`" -HostAddress $HostAddress -Port $Port -BaseDir `"$BaseDir`""
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments -WorkingDirectory $AppDir
+$escapedRunnerScript = $RunnerScript.Replace('"', '""')
+$escapedBaseDir = $BaseDir.Replace('"', '""')
+$launcherBody = @"
+Set shell = CreateObject("WScript.Shell")
+shell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""$escapedRunnerScript"" -HostAddress $HostAddress -Port $Port -BaseDir ""$escapedBaseDir""", 0, False
+"@
+Set-Content -LiteralPath $LauncherScript -Value $launcherBody -Encoding ASCII
+
+$arguments = "//B //NoLogo `"$LauncherScript`""
+$action = New-ScheduledTaskAction -Execute "wscript.exe" -Argument $arguments -WorkingDirectory $AppDir
 $triggerAtLogon = New-ScheduledTaskTrigger -AtLogOn
 $triggerAtStartup = New-ScheduledTaskTrigger -AtStartup
 $triggerWatchdog = New-ScheduledTaskTrigger `
