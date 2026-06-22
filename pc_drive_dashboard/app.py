@@ -4,7 +4,7 @@ import socket
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Request, Response
+from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -13,12 +13,15 @@ from .audit_log import AuditLog
 from .drives import list_drives
 from .filesystem import (
     FilesystemUnavailable,
+    UploadConflictError,
+    UploadNameError,
     item_metadata,
     list_children,
     open_in_explorer,
     path_variants,
     preview_file_path,
     preview_media_type,
+    upload_file_to_folder,
 )
 from .path_utils import PathError
 from .security import SecurityStore
@@ -50,7 +53,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings.ensure_dirs()
     store = SecurityStore(resolved_settings.config_path)
     audit = AuditLog(resolved_settings.log_dir)
-    app = FastAPI(title="Gateway Dashboard", version="0.9.0")
+    app = FastAPI(title="Gateway Dashboard", version="0.9.1")
     static_dir = Path(__file__).parent / "static"
 
     app.state.settings = resolved_settings
@@ -209,6 +212,47 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         audit.record("filesystem.open", "ok", path=payload.path)
         return {"ok": True}
+
+    @app.post("/api/upload")
+    async def upload_file(
+        request: Request,
+        path: Annotated[str, Form()],
+        file: Annotated[UploadFile, File()],
+        token: Annotated[str, Depends(require_csrf)],
+    ) -> dict[str, Any]:
+        try:
+            result = upload_file_to_folder(path, file.filename or "", file.file)
+        except PathError as exc:
+            audit.record("filesystem.upload", "rejected", path=path, filename=file.filename, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except UploadNameError as exc:
+            audit.record("filesystem.upload", "rejected", path=path, filename=file.filename, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except UploadConflictError as exc:
+            audit.record("filesystem.upload", "conflict", path=path, filename=file.filename)
+            raise HTTPException(status_code=409, detail=f"File already exists: {file.filename}") from exc
+        except FilesystemUnavailable as exc:
+            audit.record("filesystem.upload", "unavailable", path=path, filename=file.filename, reason=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            audit.record("filesystem.upload", "missing", path=path, filename=file.filename)
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except NotADirectoryError as exc:
+            audit.record("filesystem.upload", "not_directory", path=path, filename=file.filename)
+            raise HTTPException(status_code=400, detail="Uploads require a folder destination.") from exc
+        finally:
+            await file.close()
+
+        audit.record(
+            "filesystem.upload",
+            "ok",
+            path=result["path"],
+            folder=path,
+            filename=result["name"],
+            size=result["size"],
+            client=request.client.host if request.client else None,
+        )
+        return result
 
     @app.get("/api/jobs")
     async def jobs(token: Annotated[str, Depends(require_auth)], limit: int = 100) -> dict[str, Any]:

@@ -21,6 +21,7 @@ Gateway Dashboard is a self-hosted browser dashboard for browsing a Windows stor
 - Tailscale/loopback-first bind guard with an explicit public-bind override.
 - Windows drive overview cards.
 - Fast folder explorer with single-click folder navigation.
+- Folder uploads from the browser into the selected Windows folder.
 - Dashboard previews for images, video, audio, PDF, and text files.
 - Preview-window actions menu for copy/open workflows.
 - Right-click file and folder actions.
@@ -103,6 +104,7 @@ G:\Tools\GatewayDashboard\data
 - Use `--allow-public-bind` only when you intentionally understand the network exposure.
 - The app stores salted password hashes, not raw passwords.
 - File browsing and preview routes are intended for trusted personal/admin use on systems you own or administer.
+- Uploads write files to the selected folder, reject unsafe Windows filenames, and do not silently overwrite existing files.
 - Gateway Dashboard is independent software and is not affiliated with, endorsed by, or sponsored by Tailscale.
 
 ## Development

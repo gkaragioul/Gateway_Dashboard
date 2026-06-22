@@ -2,13 +2,36 @@ import os
 import mimetypes
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+from uuid import uuid4
 
 from .path_utils import PathError, format_path_variants, normalize_windows_path
 
 
 class FilesystemUnavailable(RuntimeError):
     """Raised when a Windows filesystem operation cannot run here."""
+
+
+class UploadConflictError(FileExistsError):
+    """Raised when an upload would overwrite an existing file."""
+
+
+class UploadNameError(ValueError):
+    """Raised when an upload filename is unsafe for Windows."""
+
+
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+
+WINDOWS_FORBIDDEN_FILENAME_CHARS = set('<>:"/\\|?*')
 
 
 TEXT_EXTENSIONS = {
@@ -179,6 +202,69 @@ def open_in_explorer(raw_path: str) -> None:
     if not target.exists():
         raise FileNotFoundError(path)
     subprocess.Popen(["explorer.exe", path])
+
+
+def upload_file_to_folder(raw_folder_path: str, raw_filename: str, source: BinaryIO) -> dict[str, Any]:
+    folder_path = normalize_windows_path(raw_folder_path)
+    filename = sanitize_upload_filename(raw_filename)
+    _require_windows()
+    folder = Path(folder_path)
+    if not folder.exists():
+        raise FileNotFoundError(folder_path)
+    if not folder.is_dir():
+        raise NotADirectoryError(folder_path)
+
+    target = folder / filename
+    if target.exists():
+        raise UploadConflictError(str(target))
+
+    temp_target = folder / f".{filename}.upload-{uuid4().hex}.tmp"
+    bytes_written = 0
+    try:
+        with temp_target.open("xb") as handle:
+            while True:
+                chunk = source.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                bytes_written += len(chunk)
+        if target.exists():
+            raise UploadConflictError(str(target))
+        try:
+            temp_target.rename(target)
+        except FileExistsError as exc:
+            raise UploadConflictError(str(target)) from exc
+    except Exception:
+        try:
+            temp_target.unlink(missing_ok=True)
+        finally:
+            raise
+
+    return {
+        "name": filename,
+        "path": normalize_windows_path(str(target)),
+        "size": bytes_written,
+    }
+
+
+def sanitize_upload_filename(raw_filename: str) -> str:
+    if not isinstance(raw_filename, str) or not raw_filename.strip():
+        raise UploadNameError("Upload filename is required.")
+
+    filename = raw_filename.strip()
+    if "/" in filename or "\\" in filename:
+        raise UploadNameError("Upload filename cannot contain path separators.")
+    if filename in {".", ".."}:
+        raise UploadNameError("Upload filename is not allowed.")
+    if filename.endswith((" ", ".")):
+        raise UploadNameError("Upload filename cannot end with a space or period.")
+    if any(char in WINDOWS_FORBIDDEN_FILENAME_CHARS or ord(char) < 32 for char in filename):
+        raise UploadNameError("Upload filename contains characters Windows cannot store.")
+
+    stem = filename.split(".", 1)[0].upper()
+    if stem in WINDOWS_RESERVED_NAMES:
+        raise UploadNameError("Upload filename is reserved on Windows.")
+    return filename
 
 
 def _require_windows() -> None:

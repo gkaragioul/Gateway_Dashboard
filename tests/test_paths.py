@@ -1,6 +1,6 @@
 import unittest
 
-from pc_drive_dashboard.filesystem import preview_media_type
+from pc_drive_dashboard.filesystem import UploadNameError, preview_media_type, sanitize_upload_filename
 from pc_drive_dashboard.path_utils import PathError, format_path_variants, normalize_windows_path
 
 
@@ -33,6 +33,14 @@ class PathUtilsTests(unittest.TestCase):
         self.assertEqual(preview_media_type("G:\\Docs\\notes.md"), "text/plain; charset=utf-8")
         self.assertEqual(preview_media_type("G:\\Web\\page.html"), "text/plain; charset=utf-8")
         self.assertEqual(preview_media_type("G:\\Vector\\icon.svg"), "text/plain; charset=utf-8")
+
+    def test_upload_filename_validation_rejects_windows_unsafe_names(self):
+        self.assertEqual(sanitize_upload_filename("photo library.zip"), "photo library.zip")
+
+        for filename in ("", "..", "folder/file.txt", "folder\\file.txt", "CON", "bad:name.txt", "trailing."):
+            with self.subTest(filename=filename):
+                with self.assertRaises(UploadNameError):
+                    sanitize_upload_filename(filename)
 
 
 if __name__ == "__main__":

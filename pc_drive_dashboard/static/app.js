@@ -6,6 +6,7 @@ const state = {
   currentChildren: [],
   activePath: null,
   currentPreviewPath: null,
+  uploadTargetPath: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -56,6 +57,7 @@ function bindEvents() {
   $("previewActionsButton").addEventListener("click", showPreviewActions);
   $("previewPreviousButton").addEventListener("click", () => previewAdjacent(-1));
   $("previewNextButton").addEventListener("click", () => previewAdjacent(1));
+  $("uploadInput").addEventListener("change", handleUploadSelection);
   $("previewOverlay").addEventListener("click", (event) => {
     if (event.target === $("previewOverlay")) closePreview();
   });
@@ -262,6 +264,7 @@ async function showContextMenu(event, path, kind, row = null, x = event.clientX,
   try {
     await setContextTarget(path, kind);
     renderContextPreview(state.contextTarget);
+    updateContextActions(state.contextTarget);
     positionContextMenu(x, y);
   } catch (error) {
     toast(error.message);
@@ -278,6 +281,7 @@ async function showPreviewActions(event) {
   try {
     await setContextTarget(state.currentPreviewPath, "file");
     renderContextPreview(state.contextTarget);
+    updateContextActions(state.contextTarget);
     positionContextMenu(rect.left, rect.bottom + 6);
   } catch (error) {
     toast(error.message);
@@ -301,6 +305,14 @@ function positionContextMenu(x, y) {
 function hideContextMenu() {
   $("contextMenu").classList.add("hidden");
   clearContextPreview();
+  updateContextActions(null);
+}
+
+function updateContextActions(target) {
+  const canUpload = target && (target.kind === "folder" || target.kind === "drive");
+  document.querySelectorAll("[data-folder-action='upload']").forEach((button) => {
+    button.classList.toggle("hidden", !canUpload);
+  });
 }
 
 function renderContextPreview(target) {
@@ -510,6 +522,10 @@ async function contextAction(action) {
     await openPath(target.path);
     return;
   }
+  if (action === "upload") {
+    chooseUploadFiles(target);
+    return;
+  }
   const variantByAction = {
     "copy-windows": "windows",
     "copy-ssh": "ssh",
@@ -544,6 +560,77 @@ async function copyToClipboard(value) {
   const copied = document.execCommand("copy");
   textarea.remove();
   if (!copied) throw new Error("Clipboard copy failed");
+}
+
+function chooseUploadFiles(target) {
+  if (!target || (target.kind !== "folder" && target.kind !== "drive")) return;
+  state.uploadTargetPath = target.path;
+  const input = $("uploadInput");
+  input.value = "";
+  input.click();
+}
+
+async function handleUploadSelection(event) {
+  const input = event.currentTarget;
+  const targetPath = state.uploadTargetPath;
+  const files = Array.from(input.files || []);
+  state.uploadTargetPath = null;
+  input.value = "";
+  if (!targetPath || !files.length) return;
+
+  let uploaded = 0;
+  for (const file of files) {
+    try {
+      await uploadFileToPath(targetPath, file, (loaded, total) => {
+        const percent = total ? ` ${Math.round((loaded / total) * 100)}%` : "";
+        const progress = total ? ` (${formatBytes(loaded)} / ${formatBytes(total)})` : ` (${formatBytes(loaded)})`;
+        toast(`Uploading ${file.name}${percent}${progress}`);
+      });
+      uploaded += 1;
+      toast(`Uploaded ${uploaded}/${files.length}: ${file.name}`);
+    } catch (error) {
+      toast(`Upload failed: ${file.name}: ${error.message}`);
+      break;
+    }
+  }
+
+  if (uploaded) {
+    await loadPath(targetPath);
+    toast(`Uploaded ${uploaded} file${uploaded === 1 ? "" : "s"} to ${targetPath}`);
+  }
+}
+
+function uploadFileToPath(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("X-CSRF-Token", csrfToken());
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    });
+    xhr.addEventListener("load", () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(JSON.parse(xhr.responseText || "{}"));
+        return;
+      }
+      let message = `${xhr.status} ${xhr.statusText}`;
+      try {
+        const body = JSON.parse(xhr.responseText || "{}");
+        message = body.detail || message;
+      } catch (_) {
+        // Keep the HTTP status text.
+      }
+      reject(new Error(message));
+    });
+    xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+    xhr.addEventListener("abort", () => reject(new Error("Upload aborted")));
+
+    const form = new FormData();
+    form.append("path", path);
+    form.append("file", file, file.name);
+    xhr.send(form);
+  });
 }
 
 async function previewDashboardItem(item) {

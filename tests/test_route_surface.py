@@ -43,6 +43,7 @@ class RouteSurfaceTests(unittest.TestCase):
             "/api/file",
             "/api/path/copy",
             "/api/open",
+            "/api/upload",
             "/api/jobs",
         ):
             self.assertIn(path, paths)

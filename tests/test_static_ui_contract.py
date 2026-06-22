@@ -63,16 +63,18 @@ class StaticUiContractTests(unittest.TestCase):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         script = (STATIC / "app.js").read_text(encoding="utf-8")
 
-        for action in ("preview", "open", "copy-windows", "copy-ssh", "copy-posix", "copy-name"):
+        for action in ("preview", "open", "upload", "copy-windows", "copy-ssh", "copy-posix", "copy-name"):
             self.assertIn(f'data-context-action="{action}"', html)
 
         self.assertIn('action === "preview"', script)
+        self.assertIn('action === "upload"', script)
         self.assertIn('"copy-posix": "posix"', script)
         self.assertIn('action === "open"', script)
         self.assertIn("copyToClipboard", script)
         self.assertIn('document.execCommand("copy")', script)
         self.assertIn('/api/file?path=', script)
         self.assertIn('/api/open', script)
+        self.assertIn('/api/upload', script)
         self.assertIn('/api/path/copy', script)
 
     def test_double_click_previews_files_without_opening_on_pc(self):
@@ -195,6 +197,24 @@ class StaticUiContractTests(unittest.TestCase):
         self.assertIn("preview-video-controls", styles)
         self.assertIn("video-seek", styles)
         self.assertIn("video-volume", styles)
+
+    def test_folder_context_menu_supports_uploads_from_browser(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        script = (STATIC / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="uploadInput"', html)
+        self.assertIn('type="file"', html)
+        self.assertIn("multiple", html)
+        self.assertIn('data-folder-action="upload"', html)
+        self.assertIn("Upload files here", html)
+        self.assertIn("updateContextActions", script)
+        self.assertIn("chooseUploadFiles", script)
+        self.assertIn("handleUploadSelection", script)
+        self.assertIn("uploadFileToPath", script)
+        self.assertIn("XMLHttpRequest", script)
+        self.assertIn('xhr.setRequestHeader("X-CSRF-Token", csrfToken())', script)
+        self.assertIn('form.append("path", path)', script)
+        self.assertIn('form.append("file", file, file.name)', script)
 
     def test_explorer_arrows_navigate_folder_levels_not_item_history(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")

@@ -93,11 +93,13 @@
       <div id="contextPreview" class="context-preview hidden"></div>
       <button type="button" role="menuitem" data-context-action="preview">Open in dashboard</button>
       <button type="button" role="menuitem" data-context-action="open">Open on PC</button>
+      <button type="button" role="menuitem" data-context-action="upload" data-folder-action="upload" class="hidden">Upload files here</button>
       <button type="button" role="menuitem" data-context-action="copy-windows">Copy Windows path</button>
       <button type="button" role="menuitem" data-context-action="copy-ssh">Copy SSH path</button>
       <button type="button" role="menuitem" data-context-action="copy-posix">Copy POSIX path</button>
       <button type="button" role="menuitem" data-context-action="copy-name">Copy name</button>
     </div>
+    <input id="uploadInput" class="hidden" type="file" multiple />
     <div id="previewOverlay" class="preview-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="previewTitle">
       <section class="preview-shell">
         <header class="preview-header">
@@ -118,6 +120,6 @@
       </section>
     </div>
     <div id="toast" class="toast hidden"></div>
-    <script src="/static/app.js?v=video-controls-v1"></script>
+    <script src="/static/app.js?v=folder-upload-v1"></script>
   </body>
 </html>
