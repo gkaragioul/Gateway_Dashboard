@@ -28,6 +28,7 @@ Gateway Dashboard is a self-hosted browser dashboard for browsing a Windows stor
 - Right-click file and folder actions.
 - Copy Windows, SSH-style, POSIX-style, and item-name path variants.
 - JSONL audit log for authentication and filesystem actions.
+- Windows scheduled-task watchdog installer for keeping the dashboard alive.
 - App logo, favicon, and dashboard styling included.
 
 ## Download
