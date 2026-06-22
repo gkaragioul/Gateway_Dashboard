@@ -1,6 +1,6 @@
 import unittest
 
-from pc_drive_dashboard.filesystem import UploadNameError, preview_media_type, sanitize_upload_filename
+from pc_drive_dashboard.filesystem import UploadNameError, common_locations, preview_media_type, sanitize_upload_filename
 from pc_drive_dashboard.path_utils import PathError, format_path_variants, normalize_windows_path
 
 
@@ -41,6 +41,9 @@ class PathUtilsTests(unittest.TestCase):
             with self.subTest(filename=filename):
                 with self.assertRaises(UploadNameError):
                     sanitize_upload_filename(filename)
+
+    def test_common_locations_are_empty_off_windows(self):
+        self.assertEqual(common_locations(), [])
 
 
 if __name__ == "__main__":

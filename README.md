@@ -21,6 +21,7 @@ Gateway Dashboard is a self-hosted browser dashboard for browsing a Windows stor
 - Tailscale/loopback-first bind guard with an explicit public-bind override.
 - Windows drive overview cards.
 - Fast folder explorer with single-click folder navigation.
+- Desktop quick shortcut for browsing and uploading to the Windows Desktop.
 - Folder uploads from the browser into the selected Windows folder.
 - Dashboard previews for images, video, audio, PDF, and text files.
 - Preview-window actions menu for copy/open workflows.

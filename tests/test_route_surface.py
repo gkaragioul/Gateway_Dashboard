@@ -39,6 +39,7 @@ class RouteSurfaceTests(unittest.TestCase):
             "/api/auth/login",
             "/api/auth/logout",
             "/api/drives",
+            "/api/locations",
             "/api/tree",
             "/api/file",
             "/api/path/copy",

@@ -151,6 +151,23 @@ def list_children(raw_path: str, page: int = 1, page_size: int = 200) -> dict[st
     }
 
 
+def common_locations() -> list[dict[str, str]]:
+    if os.name != "nt":
+        return []
+
+    locations = []
+    desktop = Path.home() / "Desktop"
+    if desktop.exists() and desktop.is_dir():
+        locations.append(
+            {
+                "name": "Desktop",
+                "path": normalize_windows_path(str(desktop)),
+                "kind": "folder",
+            }
+        )
+    return locations
+
+
 def item_metadata(raw_path: str) -> dict[str, Any]:
     path = normalize_windows_path(raw_path)
     _require_windows()

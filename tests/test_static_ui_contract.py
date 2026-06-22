@@ -216,6 +216,23 @@ class StaticUiContractTests(unittest.TestCase):
         self.assertIn('form.append("path", path)', script)
         self.assertIn('form.append("file", file, file.name)', script)
 
+    def test_explorer_has_desktop_quick_location_for_upload_target(self):
+        html = (STATIC / "index.html").read_text(encoding="utf-8")
+        script = (STATIC / "app.js").read_text(encoding="utf-8")
+        styles = (STATIC / "styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="quickLocations"', html)
+        self.assertIn("desktop-shortcut-v1", html)
+        self.assertIn("loadLocations", script)
+        self.assertIn('/api/locations', script)
+        self.assertIn("renderQuickLocations", script)
+        self.assertIn("quick-location-button", script)
+        self.assertIn("quick-location-action", script)
+        self.assertIn("showContextMenu(event, location.path", script)
+        self.assertIn("quick-locations", styles)
+        self.assertIn("quick-location-button", styles)
+        self.assertIn("quick-location-action", styles)
+
     def test_explorer_arrows_navigate_folder_levels_not_item_history(self):
         html = (STATIC / "index.html").read_text(encoding="utf-8")
         script = (STATIC / "app.js").read_text(encoding="utf-8")

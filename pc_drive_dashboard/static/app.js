@@ -4,6 +4,7 @@ const state = {
   contextTarget: null,
   currentPath: null,
   currentChildren: [],
+  locations: [],
   activePath: null,
   currentPreviewPath: null,
   uploadTargetPath: null,
@@ -122,7 +123,7 @@ async function handleAuth(event) {
 }
 
 async function loadDashboard() {
-  await loadDrives();
+  await Promise.all([loadDrives(), loadLocations()]);
   if (state.currentPath) {
     await loadPath(state.currentPath);
   }
@@ -147,6 +148,46 @@ async function loadDrives() {
     button.addEventListener("click", () => loadPath(drive.path));
     button.addEventListener("contextmenu", (event) => showContextMenu(event, drive.path, "drive"));
     grid.appendChild(button);
+  });
+}
+
+async function loadLocations() {
+  const data = await api("/api/locations");
+  state.locations = data.locations || [];
+  renderQuickLocations();
+}
+
+function renderQuickLocations() {
+  const container = $("quickLocations");
+  container.innerHTML = "";
+  container.classList.toggle("hidden", !state.locations.length);
+  state.locations.forEach((location) => {
+    const item = document.createElement("div");
+    item.className = "quick-location";
+    item.addEventListener("contextmenu", (event) => showContextMenu(event, location.path, location.kind || "folder"));
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "quick-location-button";
+    button.textContent = location.name;
+    button.title = location.path;
+    button.addEventListener("click", () => loadPath(location.path));
+
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "quick-location-action";
+    action.textContent = "...";
+    action.title = `${location.name} actions`;
+    action.setAttribute("aria-label", `${location.name} actions`);
+    action.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = action.getBoundingClientRect();
+      showContextMenu(event, location.path, location.kind || "folder", null, rect.left, rect.bottom + 6);
+    });
+
+    item.append(button, action);
+    container.appendChild(item);
   });
 }
 

@@ -284,6 +284,51 @@ input:focus-visible {
   gap: 8px;
 }
 
+.quick-locations {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fffaf0;
+}
+
+.quick-location {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid rgba(240, 165, 26, 0.34);
+  border-radius: 8px;
+  background: #fffdf7;
+}
+
+.quick-location-button,
+.quick-location-action {
+  min-height: 36px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.quick-location-button {
+  padding: 0 14px;
+  font-weight: 700;
+}
+
+.quick-location-action {
+  width: 38px;
+  border-left: 1px solid #eee4d3;
+  color: var(--copper);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.quick-location-button:hover,
+.quick-location-action:hover,
+.quick-location-button:focus-visible,
+.quick-location-action:focus-visible {
+  background: #fff2d2;
+  outline: none;
+}
+
 .panel h3 {
   font-size: 16px;
 }

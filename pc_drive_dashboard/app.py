@@ -15,6 +15,7 @@ from .filesystem import (
     FilesystemUnavailable,
     UploadConflictError,
     UploadNameError,
+    common_locations,
     item_metadata,
     list_children,
     open_in_explorer,
@@ -53,7 +54,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings.ensure_dirs()
     store = SecurityStore(resolved_settings.config_path)
     audit = AuditLog(resolved_settings.log_dir)
-    app = FastAPI(title="Gateway Dashboard", version="0.9.1")
+    app = FastAPI(title="Gateway Dashboard", version="0.9.2")
     static_dir = Path(__file__).parent / "static"
 
     app.state.settings = resolved_settings
@@ -135,6 +136,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     @app.get("/api/drives")
     async def drives(token: Annotated[str, Depends(require_auth)]) -> dict[str, Any]:
         return {"drives": list_drives()}
+
+    @app.get("/api/locations")
+    async def locations(token: Annotated[str, Depends(require_auth)]) -> dict[str, Any]:
+        return {"locations": common_locations()}
 
     @app.get("/api/tree")
     async def tree(
