@@ -4,6 +4,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = ROOT / "pc_drive_dashboard" / "static"
+# Cache key on styles.css/app.js in index.html; bump it whenever those files change.
+ASSET_VERSION = "file-ops-v4"
 
 
 class StaticUiContractTests(unittest.TestCase):
@@ -182,7 +184,8 @@ class StaticUiContractTests(unittest.TestCase):
         script = (STATIC / "app.js").read_text(encoding="utf-8")
         styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-        self.assertIn("video-controls-v1", html)
+        self.assertIn(f"styles.css?v={ASSET_VERSION}", html)
+        self.assertIn(f"app.js?v={ASSET_VERSION}", html)
         self.assertIn("createVideoPlayer", script)
         self.assertIn("preview-video-controls", script)
         self.assertIn("video-seek", script)
@@ -222,7 +225,8 @@ class StaticUiContractTests(unittest.TestCase):
         styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
         self.assertIn('id="quickLocations"', html)
-        self.assertIn("desktop-shortcut-v1", html)
+        self.assertIn(f"styles.css?v={ASSET_VERSION}", html)
+        self.assertIn(f"app.js?v={ASSET_VERSION}", html)
         self.assertIn("loadLocations", script)
         self.assertIn('/api/locations', script)
         self.assertIn("renderQuickLocations", script)

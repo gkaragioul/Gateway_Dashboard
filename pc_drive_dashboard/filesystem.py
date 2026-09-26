@@ -1,8 +1,12 @@
 import os
 import mimetypes
+import re
 import shutil
+import stat
 import subprocess
+import time
 import zipfile
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -40,6 +44,11 @@ class PreparedDownload:
 
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+# Folder downloads are zipped on the PC first: keep this much disk free and clear abandoned zips.
+DOWNLOAD_FREE_SPACE_RESERVE = 1024 * 1024 * 1024
+STALE_DOWNLOAD_ARCHIVE_SECONDS = 6 * 60 * 60
+_DOWNLOAD_ARCHIVE_NAME = re.compile(r"-[0-9a-f]{32}\.zip$")
 
 WINDOWS_RESERVED_NAMES = {
     "CON",
@@ -240,7 +249,12 @@ def open_in_explorer(raw_path: str) -> None:
     subprocess.Popen(["explorer.exe", path])
 
 
-def paste_item(raw_source_path: str, raw_destination_folder_path: str, operation: str) -> dict[str, Any]:
+def paste_item(
+    raw_source_path: str,
+    raw_destination_folder_path: str,
+    operation: str,
+    protected_paths: Iterable[Path] = (),
+) -> dict[str, Any]:
     source_path = normalize_windows_path(raw_source_path)
     destination_folder_path = normalize_windows_path(raw_destination_folder_path)
     normalized_operation = str(operation or "").strip().lower()
@@ -254,6 +268,8 @@ def paste_item(raw_source_path: str, raw_destination_folder_path: str, operation
         raise FileOperationSafetyError("Drive roots cannot be copied or moved.")
     if not source.exists():
         raise FileNotFoundError(source_path)
+    if normalized_operation == "cut":
+        _reject_protected(source, protected_paths, "moved")
     if not destination_folder.exists():
         raise FileNotFoundError(destination_folder_path)
     if not destination_folder.is_dir():
@@ -282,27 +298,40 @@ def paste_item(raw_source_path: str, raw_destination_folder_path: str, operation
     }
 
 
-def delete_item(raw_path: str) -> dict[str, Any]:
+def delete_item(raw_path: str, protected_paths: Iterable[Path] = ()) -> dict[str, Any]:
+    """Permanently delete a file or folder (nothing goes to the Recycle Bin).
+
+    A symbolic link or junction is removed as a link only: what it points to is never touched.
+    Folder contents are removed with shutil.rmtree, which does not follow links or junctions inside.
+    """
     path = normalize_windows_path(raw_path)
     _require_windows()
     if _is_drive_root(path):
         raise FileOperationSafetyError("Drive roots cannot be deleted.")
 
     target = Path(path)
-    if not target.exists():
+    if not os.path.lexists(target):
         raise FileNotFoundError(path)
+    _reject_protected(target, protected_paths, "deleted")
 
-    was_dir = target.is_dir()
-    if was_dir:
+    if _is_link_or_junction(target):
+        if getattr(os.lstat(target), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_DIRECTORY:
+            os.rmdir(target)  # Removes a directory link/junction itself, never its target.
+        else:
+            os.unlink(target)
+        kind = "link"
+    elif target.is_dir():
         shutil.rmtree(target)
+        kind = "folder"
     else:
         target.unlink()
+        kind = "file"
 
     return {
         "operation": "delete",
         "path": path,
         "name": target.name,
-        "kind": "folder" if was_dir else "file",
+        "kind": kind,
     }
 
 
@@ -323,15 +352,28 @@ def prepare_download(raw_path: str, archive_dir: Path) -> PreparedDownload:
 
     if not target.is_dir():
         raise FileNotFoundError(path)
+    if _is_drive_root(path):
+        raise FileOperationSafetyError("A whole drive cannot be downloaded. Download a folder inside it instead.")
 
     archive_dir.mkdir(parents=True, exist_ok=True)
+    _remove_stale_download_archives(archive_dir)
+    files, total_size = _collect_download_files(target, skip_dir=archive_dir)
+    free_space = shutil.disk_usage(archive_dir).free
+    if total_size + DOWNLOAD_FREE_SPACE_RESERVE > free_space:
+        raise FileOperationSafetyError(
+            "Not enough free space on the PC to prepare this folder download "
+            f"({total_size // (1024 * 1024)} MB of files, {free_space // (1024 * 1024)} MB free)."
+        )
+
     basename = _download_basename(target)
     archive_path = archive_dir / f"{basename}-{uuid4().hex}.zip"
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for child in target.rglob("*"):
-            if child.is_dir():
-                continue
-            archive.write(child, child.relative_to(target).as_posix())
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for child in files:
+                archive.write(child, child.relative_to(target).as_posix())
+    except BaseException:
+        archive_path.unlink(missing_ok=True)
+        raise
 
     return PreparedDownload(
         path=archive_path,
@@ -339,6 +381,72 @@ def prepare_download(raw_path: str, archive_dir: Path) -> PreparedDownload:
         media_type="application/zip",
         cleanup=True,
     )
+
+
+def _collect_download_files(target: Path, skip_dir: Path) -> tuple[list[Path], int]:
+    """Files to zip, without following links/junctions and without the dashboard's own zip folder."""
+    skip = _canonical(skip_dir)
+    files: list[Path] = []
+    total_size = 0
+    for dirpath, dirnames, filenames in os.walk(target, followlinks=False):
+        folder = Path(dirpath)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not _is_link_or_junction(folder / name) and not _is_same_or_inside(_canonical(folder / name), skip)
+        ]
+        for name in filenames:
+            child = folder / name
+            if _is_link_or_junction(child):
+                continue
+            try:
+                total_size += child.stat().st_size
+            except OSError:
+                continue
+            files.append(child)
+    return files, total_size
+
+
+def _remove_stale_download_archives(archive_dir: Path) -> None:
+    """Remove the dashboard's own leftover folder-download zips (e.g. after an interrupted download)."""
+    cutoff = time.time() - STALE_DOWNLOAD_ARCHIVE_SECONDS
+    for archive in archive_dir.glob("*.zip"):
+        try:
+            if _DOWNLOAD_ARCHIVE_NAME.search(archive.name) and archive.stat().st_mtime < cutoff:
+                archive.unlink()
+        except OSError:
+            continue
+
+
+def _is_link_or_junction(path: Path) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    return bool(getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT) and (
+        getattr(info, "st_reparse_tag", None) == stat.IO_REPARSE_TAG_MOUNT_POINT
+    )
+
+
+def _reject_protected(target: Path, protected_paths: Iterable[Path], verb: str) -> None:
+    candidate = _canonical(target)
+    for protected in protected_paths:
+        guarded = _canonical(protected)
+        if _is_same_or_inside(candidate, guarded) or _is_same_or_inside(guarded, candidate):
+            raise FileOperationSafetyError(
+                f"The dashboard's own folders (and folders containing them) cannot be {verb} from the dashboard."
+            )
+
+
+def _canonical(path: Path) -> str:
+    return os.path.normcase(os.path.realpath(path))
+
+
+def _is_same_or_inside(child: str, parent: str) -> bool:
+    parent = parent.rstrip("\\/")
+    return child == parent or child.startswith(parent + os.sep)
 
 
 def _download_basename(target: Path) -> str:

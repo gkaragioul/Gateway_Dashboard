@@ -803,11 +803,15 @@ async function pasteClipboardInto(destinationPath) {
 async function deleteRemoteItem(target) {
   if (!target || !target.path || target.kind === "drive") return;
   const name = target.name || fileNameFromPath(target.path);
-  if (!window.confirm(`Delete ${name} from the PC? This cannot be undone from the dashboard.`)) return;
+  const what = target.kind === "folder" ? `the folder "${name}" and everything inside it` : `"${name}"`;
+  const question =
+    `Permanently delete ${what} from the PC?\n\n` +
+    "It does NOT go to the Recycle Bin. This cannot be undone.";
+  if (!window.confirm(question)) return;
   try {
     await api("/api/delete", {
       method: "POST",
-      body: JSON.stringify({ path: target.path }),
+      body: JSON.stringify({ path: target.path, confirm_permanent: true }),
     });
     if (state.fileClipboard?.path === target.path) state.fileClipboard = null;
     if (state.currentPreviewPath === target.path) closePreview();

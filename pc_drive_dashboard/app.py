@@ -70,6 +70,16 @@ class PasteRequest(BaseModel):
     operation: str
 
 
+class DeleteRequest(PathRequest):
+    # Deleting is permanent (no Recycle Bin), so callers must say so explicitly.
+    confirm_permanent: bool = False
+
+
+WRITES_DISABLED_MESSAGE = (
+    "File changes (upload, copy, move and delete) are turned off on this PC (PCDD_ENABLE_WRITES=0)."
+)
+
+
 def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings = settings or AppSettings.from_env()
     resolved_settings.ensure_dirs()
@@ -79,6 +89,14 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     static_dir = Path(__file__).parent / "static"
     config_dir = resolved_settings.config_path.parent
     login_limiter = LoginRateLimiter()
+    # Delete and move refuse these folders, anything inside them, and any folder that contains them.
+    protected_paths = (
+        resolved_settings.base_dir,
+        config_dir,
+        resolved_settings.log_dir,
+        resolved_settings.data_dir,
+        Path(__file__).parent,  # the dashboard's own code (already absolute; compared canonically when used)
+    )
 
     app.state.settings = resolved_settings
     app.state.security_store = store
@@ -98,6 +116,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         if not store.verify_trusted_token(pcdd_session):
             raise HTTPException(status_code=401, detail="Authentication required.")
         return pcdd_session or ""
+
+    def require_writes(event: str, **fields: Any) -> None:
+        if not resolved_settings.write_operations_enabled:
+            audit.record(event, "disabled", **fields)
+            raise HTTPException(status_code=403, detail=WRITES_DISABLED_MESSAGE)
 
     async def require_csrf(
         token: Annotated[str, Depends(require_auth)],
@@ -272,12 +295,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         token: Annotated[str, Depends(require_csrf)],
     ) -> dict[str, Any]:
         try:
-            if not resolved_settings.write_operations_enabled:
-                audit.record("filesystem.upload", "disabled", path=path, filename=file.filename)
-                raise HTTPException(
-                    status_code=403,
-                    detail="Uploads are turned off on this PC (PCDD_ENABLE_WRITES=0).",
-                )
+            require_writes("filesystem.upload", path=path, filename=file.filename)
             result = upload_file_to_folder(path, file.filename or "", file.file)
         except PathError as exc:
             audit.record("filesystem.upload", "rejected", path=path, filename=file.filename, reason=str(exc))
@@ -320,7 +338,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     ) -> FileResponse:
         try:
             prepared = prepare_download(path, resolved_settings.data_dir / "downloads")
-        except PathError as exc:
+        except (PathError, FileOperationSafetyError) as exc:
             audit.record("filesystem.download", "rejected", path=path, reason=str(exc))
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except FilesystemUnavailable as exc:
@@ -355,7 +373,18 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         token: Annotated[str, Depends(require_csrf)],
     ) -> dict[str, Any]:
         try:
-            result = paste_item(payload.source_path, payload.destination_path, payload.operation)
+            require_writes(
+                "filesystem.paste",
+                source=payload.source_path,
+                destination=payload.destination_path,
+                operation=payload.operation,
+            )
+            result = paste_item(
+                payload.source_path,
+                payload.destination_path,
+                payload.operation,
+                protected_paths=protected_paths,
+            )
         except PathError as exc:
             audit.record("filesystem.paste", "rejected", source=payload.source_path, destination=payload.destination_path, operation=payload.operation, reason=str(exc))
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -388,12 +417,18 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     @app.post("/api/delete")
     async def delete_path(
-        payload: PathRequest,
+        payload: DeleteRequest,
         request: Request,
         token: Annotated[str, Depends(require_csrf)],
     ) -> dict[str, Any]:
         try:
-            result = delete_item(payload.path)
+            require_writes("filesystem.delete", path=payload.path)
+            if not payload.confirm_permanent:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Deleting is permanent (nothing goes to the Recycle Bin). Confirm with confirm_permanent=true.",
+                )
+            result = delete_item(payload.path, protected_paths=protected_paths)
         except PathError as exc:
             audit.record("filesystem.delete", "rejected", path=payload.path, reason=str(exc))
             raise HTTPException(status_code=400, detail=str(exc)) from exc
