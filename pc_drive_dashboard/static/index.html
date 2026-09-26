@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png?v=gateway-dashboard" />
     <link rel="shortcut icon" href="/favicon.ico?v=gateway-dashboard" />
     <link rel="apple-touch-icon" href="/static/app-icon.png?v=gateway-dashboard" />
-    <link rel="stylesheet" href="/static/styles.css?v=desktop-shortcut-v1" />
+    <link rel="stylesheet" href="/static/styles.css?v=file-ops-v3" />
   </head>
   <body>
     <div class="app-shell">
@@ -66,6 +66,7 @@
                   <p id="currentPath">Select a drive</p>
                 </div>
                 <div class="explorer-controls">
+                  <button id="currentFolderActionsButton" class="icon-button current-folder-actions" title="Current folder actions" aria-label="Current folder actions" disabled>...</button>
                   <button id="backButton" class="icon-button" title="Up one folder" aria-label="Up one folder" disabled>&larr;</button>
                   <button id="forwardButton" class="icon-button" title="Open selected folder" aria-label="Open selected folder" disabled>&rarr;</button>
                 </div>
@@ -95,6 +96,11 @@
       <button type="button" role="menuitem" data-context-action="preview">Open in dashboard</button>
       <button type="button" role="menuitem" data-context-action="open">Open on PC</button>
       <button type="button" role="menuitem" data-context-action="upload" data-folder-action="upload" class="hidden">Upload files here</button>
+      <button type="button" role="menuitem" data-context-action="download">Download to Mac</button>
+      <button type="button" role="menuitem" data-context-action="copy-item">Copy item</button>
+      <button type="button" role="menuitem" data-context-action="cut-item">Cut item</button>
+      <button type="button" role="menuitem" data-context-action="paste-item" data-clipboard-action="paste" class="hidden">Paste here</button>
+      <button type="button" role="menuitem" data-context-action="delete-item" data-destructive-action="delete">Delete from PC</button>
       <button type="button" role="menuitem" data-context-action="copy-windows">Copy Windows path</button>
       <button type="button" role="menuitem" data-context-action="copy-ssh">Copy SSH path</button>
       <button type="button" role="menuitem" data-context-action="copy-posix">Copy POSIX path</button>
@@ -120,7 +126,8 @@
         </div>
       </section>
     </div>
+    <div id="transferPanel" class="transfer-panel hidden" aria-live="polite"></div>
     <div id="toast" class="toast hidden"></div>
-    <script src="/static/app.js?v=desktop-shortcut-v1"></script>
+    <script src="/static/app.js?v=file-ops-v3"></script>
   </body>
 </html>

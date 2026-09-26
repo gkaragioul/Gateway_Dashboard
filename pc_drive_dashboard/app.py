@@ -6,20 +6,26 @@ from typing import Annotated, Any
 
 from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .audit_log import AuditLog
 from .drives import list_drives
 from .filesystem import (
+    FileOperationConflictError,
+    FileOperationSafetyError,
     FilesystemUnavailable,
     UploadConflictError,
     UploadNameError,
     common_locations,
+    delete_item,
     item_metadata,
     list_children,
     open_in_explorer,
+    paste_item,
     path_variants,
+    prepare_download,
     preview_file_path,
     preview_media_type,
     upload_file_to_folder,
@@ -47,6 +53,12 @@ class SetupRequest(LoginRequest):
 
 class PathRequest(BaseModel):
     path: str
+
+
+class PasteRequest(BaseModel):
+    source_path: str
+    destination_path: str
+    operation: str
 
 
 def create_app(settings: AppSettings | None = None) -> FastAPI:
@@ -259,6 +271,111 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         )
         return result
 
+
+    @app.get("/api/download")
+    async def download_path(
+        request: Request,
+        path: str,
+        token: Annotated[str, Depends(require_auth)],
+    ) -> FileResponse:
+        try:
+            prepared = prepare_download(path, resolved_settings.data_dir / "downloads")
+        except PathError as exc:
+            audit.record("filesystem.download", "rejected", path=path, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FilesystemUnavailable as exc:
+            audit.record("filesystem.download", "unavailable", path=path, reason=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            audit.record("filesystem.download", "missing", path=path)
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        audit.record(
+            "filesystem.download",
+            "ok",
+            path=path,
+            filename=prepared.filename,
+            client=request.client.host if request.client else None,
+        )
+        response = FileResponse(
+            prepared.path,
+            media_type=prepared.media_type,
+            filename=prepared.filename,
+            content_disposition_type="attachment",
+            background=BackgroundTask(_delete_file_quietly, prepared.path) if prepared.cleanup else None,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+
+    @app.post("/api/paste")
+    async def paste_path(
+        payload: PasteRequest,
+        request: Request,
+        token: Annotated[str, Depends(require_csrf)],
+    ) -> dict[str, Any]:
+        try:
+            result = paste_item(payload.source_path, payload.destination_path, payload.operation)
+        except PathError as exc:
+            audit.record("filesystem.paste", "rejected", source=payload.source_path, destination=payload.destination_path, operation=payload.operation, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileOperationSafetyError as exc:
+            audit.record("filesystem.paste", "rejected", source=payload.source_path, destination=payload.destination_path, operation=payload.operation, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileOperationConflictError as exc:
+            audit.record("filesystem.paste", "conflict", source=payload.source_path, destination=payload.destination_path, operation=payload.operation)
+            raise HTTPException(status_code=409, detail=f"Destination already exists: {exc}") from exc
+        except FilesystemUnavailable as exc:
+            audit.record("filesystem.paste", "unavailable", source=payload.source_path, destination=payload.destination_path, operation=payload.operation, reason=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            audit.record("filesystem.paste", "missing", source=payload.source_path, destination=payload.destination_path, operation=payload.operation)
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except NotADirectoryError as exc:
+            audit.record("filesystem.paste", "not_directory", source=payload.source_path, destination=payload.destination_path, operation=payload.operation)
+            raise HTTPException(status_code=400, detail="Paste requires a folder destination.") from exc
+
+        audit.record(
+            "filesystem.paste",
+            "ok",
+            source=payload.source_path,
+            destination=payload.destination_path,
+            operation=payload.operation,
+            path=result["path"],
+            client=request.client.host if request.client else None,
+        )
+        return result
+
+    @app.post("/api/delete")
+    async def delete_path(
+        payload: PathRequest,
+        request: Request,
+        token: Annotated[str, Depends(require_csrf)],
+    ) -> dict[str, Any]:
+        try:
+            result = delete_item(payload.path)
+        except PathError as exc:
+            audit.record("filesystem.delete", "rejected", path=payload.path, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FileOperationSafetyError as exc:
+            audit.record("filesystem.delete", "rejected", path=payload.path, reason=str(exc))
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except FilesystemUnavailable as exc:
+            audit.record("filesystem.delete", "unavailable", path=payload.path, reason=str(exc))
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except FileNotFoundError as exc:
+            audit.record("filesystem.delete", "missing", path=payload.path)
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+        audit.record(
+            "filesystem.delete",
+            "ok",
+            path=result["path"],
+            kind=result["kind"],
+            client=request.client.host if request.client else None,
+        )
+        return result
+
     @app.get("/api/jobs")
     async def jobs(token: Annotated[str, Depends(require_auth)], limit: int = 100) -> dict[str, Any]:
         return {"events": audit.tail(limit=limit)}
@@ -288,3 +405,10 @@ def _issue_session(response: Response, store: SecurityStore, device_name: str, r
         httponly=False,
         samesite="lax",
     )
+
+
+def _delete_file_quietly(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass

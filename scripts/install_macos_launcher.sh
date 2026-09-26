@@ -5,7 +5,21 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_NAME="Gateway Dashboard"
 APP_PATH="$HOME/Applications/$APP_NAME.app"
 ICON_PATH="$ROOT/assets/GatewayDashboard.icns"
-URL="${GATEWAY_DASHBOARD_URL:-http://127.0.0.1:8787}"
+# The dashboard address is required: pass it as the first argument or set GATEWAY_DASHBOARD_URL,
+# e.g. scripts/install_macos_launcher.sh http://<your-pc-tailscale-ip>:8787
+URL="${1:-${GATEWAY_DASHBOARD_URL:-}}"
+
+if [[ -z "$URL" ]]; then
+  echo "Usage: $0 http://<your-pc-tailscale-ip>:8787   (or set GATEWAY_DASHBOARD_URL)" >&2
+  exit 64
+fi
+case "$URL" in
+  http://*|https://*) ;;
+  *) echo "The dashboard URL must start with http:// or https:// (got: $URL)" >&2; exit 64 ;;
+esac
+case "$URL" in
+  *[[:space:]\"\'\`\$\\]*) echo "The dashboard URL must not contain spaces, quotes, \$, \` or backslashes." >&2; exit 64 ;;
+esac
 
 if [[ ! -f "$ICON_PATH" ]]; then
   "$ROOT/scripts/generate_icon.py" >/dev/null

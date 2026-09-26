@@ -8,6 +8,9 @@ const state = {
   activePath: null,
   currentPreviewPath: null,
   uploadTargetPath: null,
+  fileClipboard: null,
+  uploadProgress: null,
+  uploadProgressTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -51,6 +54,8 @@ function bindEvents() {
   $("authForm").addEventListener("submit", handleAuth);
   $("refreshButton").addEventListener("click", loadDashboard);
   $("logoutButton").addEventListener("click", logout);
+  $("currentFolderActionsButton").addEventListener("click", showCurrentFolderActions);
+  $("treeList").addEventListener("contextmenu", showCurrentFolderActions);
   $("backButton").addEventListener("click", loadParent);
   $("forwardButton").addEventListener("click", openActiveFolder);
   $("refreshLogsButton").addEventListener("click", loadLogs);
@@ -329,6 +334,31 @@ async function showPreviewActions(event) {
   }
 }
 
+async function showCurrentFolderActions(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  if (!state.currentPath) return;
+
+  let x = event.clientX;
+  let y = event.clientY;
+  if (event.type === "click") {
+    const rect = event.currentTarget.getBoundingClientRect();
+    x = rect.left;
+    y = rect.bottom + 6;
+  }
+
+  try {
+    setActiveRow(null);
+    const targetKind = isDriveRoot(state.currentPath) ? "drive" : "folder";
+    await setContextTarget(state.currentPath, targetKind);
+    renderContextPreview(state.contextTarget);
+    updateContextActions(state.contextTarget);
+    positionContextMenu(x, y);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 function positionContextMenu(x, y) {
   const menu = $("contextMenu");
   menu.classList.remove("hidden");
@@ -350,9 +380,24 @@ function hideContextMenu() {
 }
 
 function updateContextActions(target) {
-  const canUpload = target && (target.kind === "folder" || target.kind === "drive");
+  const canReceiveItems = target && (target.kind === "folder" || target.kind === "drive");
+  const isDrive = target && target.kind === "drive";
   document.querySelectorAll("[data-folder-action='upload']").forEach((button) => {
-    button.classList.toggle("hidden", !canUpload);
+    button.classList.toggle("hidden", !canReceiveItems);
+  });
+  document.querySelectorAll("[data-clipboard-action='paste']").forEach((button) => {
+    button.classList.toggle("hidden", !canReceiveItems || !state.fileClipboard);
+    if (state.fileClipboard && canReceiveItems) {
+      button.textContent = `${state.fileClipboard.mode === "cut" ? "Move" : "Copy"} ${state.fileClipboard.name} here`;
+    } else {
+      button.textContent = "Paste here";
+    }
+  });
+  document.querySelectorAll("[data-destructive-action='delete']").forEach((button) => {
+    button.classList.toggle("hidden", !target || isDrive);
+  });
+  document.querySelectorAll("[data-context-action='copy-item'], [data-context-action='cut-item']").forEach((button) => {
+    button.classList.toggle("hidden", !target || isDrive);
   });
 }
 
@@ -416,6 +461,7 @@ async function loadParent() {
 }
 
 function updateExplorerNavButtons() {
+  $("currentFolderActionsButton").disabled = !state.currentPath;
   $("backButton").disabled = !state.currentPath || isDriveRoot(state.currentPath);
   $("forwardButton").disabled = !isBrowsableFolder(activeItem());
 }
@@ -567,6 +613,26 @@ async function contextAction(action) {
     chooseUploadFiles(target);
     return;
   }
+  if (action === "download") {
+    downloadToMac(target);
+    return;
+  }
+  if (action === "copy-item") {
+    setFileClipboard(target, "copy");
+    return;
+  }
+  if (action === "cut-item") {
+    setFileClipboard(target, "cut");
+    return;
+  }
+  if (action === "paste-item") {
+    await pasteClipboardInto(target.path);
+    return;
+  }
+  if (action === "delete-item") {
+    await deleteRemoteItem(target);
+    return;
+  }
   const variantByAction = {
     "copy-windows": "windows",
     "copy-ssh": "ssh",
@@ -622,14 +688,15 @@ async function handleUploadSelection(event) {
   let uploaded = 0;
   for (const file of files) {
     try {
+      updateUploadProgress(file, 0, file.size, `Queued ${uploaded + 1}/${files.length}`);
       await uploadFileToPath(targetPath, file, (loaded, total) => {
-        const percent = total ? ` ${Math.round((loaded / total) * 100)}%` : "";
-        const progress = total ? ` (${formatBytes(loaded)} / ${formatBytes(total)})` : ` (${formatBytes(loaded)})`;
-        toast(`Uploading ${file.name}${percent}${progress}`);
+        updateUploadProgress(file, loaded, total, `Uploading ${uploaded + 1}/${files.length}`);
       });
       uploaded += 1;
+      updateUploadProgress(file, file.size, file.size, `Uploaded ${uploaded}/${files.length}`);
       toast(`Uploaded ${uploaded}/${files.length}: ${file.name}`);
     } catch (error) {
+      updateUploadProgress(file, 0, file.size, `Failed: ${error.message}`);
       toast(`Upload failed: ${file.name}: ${error.message}`);
       break;
     }
@@ -638,6 +705,107 @@ async function handleUploadSelection(event) {
   if (uploaded) {
     await loadPath(targetPath);
     toast(`Uploaded ${uploaded} file${uploaded === 1 ? "" : "s"} to ${targetPath}`);
+    scheduleTransferPanelHide();
+  }
+}
+
+function updateUploadProgress(file, loaded, total, status) {
+  state.uploadProgress = {
+    name: file.name || "Upload",
+    loaded: loaded || 0,
+    total: total || file.size || 0,
+    status: status || "Uploading",
+  };
+  renderTransferPanel(state.uploadProgress);
+}
+
+function renderTransferPanel(progress = state.uploadProgress) {
+  const panel = $("transferPanel");
+  if (!panel) return;
+  if (!progress) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  const percent = progress.total ? Math.min(100, Math.round((progress.loaded / progress.total) * 100)) : 0;
+  panel.innerHTML = `
+    <div class="transfer-panel-title">${escapeHtml(progress.status)}</div>
+    <div class="transfer-panel-name" title="${escapeHtml(progress.name)}">${escapeHtml(progress.name)}</div>
+    <div class="transfer-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}">
+      <div style="width:${percent}%"></div>
+    </div>
+    <div class="transfer-panel-meta">${percent}% · ${escapeHtml(formatBytes(progress.loaded))}${progress.total ? ` / ${escapeHtml(formatBytes(progress.total))}` : ""}</div>
+  `;
+  panel.classList.remove("hidden");
+}
+
+function scheduleTransferPanelHide() {
+  window.clearTimeout(state.uploadProgressTimer);
+  state.uploadProgressTimer = window.setTimeout(() => {
+    state.uploadProgress = null;
+    renderTransferPanel(null);
+  }, 6500);
+}
+
+function downloadToMac(target) {
+  if (!target || !target.path) return;
+  const link = document.createElement("a");
+  link.href = `/api/download?path=${encodeURIComponent(target.path)}`;
+  link.download = target.kind === "folder" || target.kind === "drive" ? `${target.name || "download"}.zip` : target.name || "download";
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  toast(`Download started: ${target.name || "item"}`);
+}
+
+function setFileClipboard(target, mode) {
+  if (!target || !target.path || target.kind === "drive") return;
+  state.fileClipboard = {
+    path: target.path,
+    name: target.name || fileNameFromPath(target.path),
+    kind: target.kind,
+    mode,
+  };
+  toast(`${mode === "cut" ? "Cut" : "Copied"}: ${state.fileClipboard.name}`);
+}
+
+async function pasteClipboardInto(destinationPath) {
+  if (!state.fileClipboard || !destinationPath) return;
+  const clipboard = state.fileClipboard;
+  try {
+    const result = await api("/api/paste", {
+      method: "POST",
+      body: JSON.stringify({
+        source_path: clipboard.path,
+        destination_path: destinationPath,
+        operation: clipboard.mode,
+      }),
+    });
+    if (clipboard.mode === "cut") state.fileClipboard = null;
+    await loadPath(destinationPath);
+    selectRowByPath(result.path);
+    toast(`${clipboard.mode === "cut" ? "Moved" : "Copied"}: ${result.name}`);
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+async function deleteRemoteItem(target) {
+  if (!target || !target.path || target.kind === "drive") return;
+  const name = target.name || fileNameFromPath(target.path);
+  if (!window.confirm(`Delete ${name} from the PC? This cannot be undone from the dashboard.`)) return;
+  try {
+    await api("/api/delete", {
+      method: "POST",
+      body: JSON.stringify({ path: target.path }),
+    });
+    if (state.fileClipboard?.path === target.path) state.fileClipboard = null;
+    if (state.currentPreviewPath === target.path) closePreview();
+    if (state.currentPath) await loadPath(state.currentPath);
+    toast(`Deleted: ${name}`);
+  } catch (error) {
+    toast(error.message);
   }
 }
 

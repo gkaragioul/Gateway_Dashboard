@@ -182,7 +182,7 @@ class StaticUiContractTests(unittest.TestCase):
         script = (STATIC / "app.js").read_text(encoding="utf-8")
         styles = (STATIC / "styles.css").read_text(encoding="utf-8")
 
-        self.assertIn("desktop-shortcut-v1", html)
+        self.assertIn("video-controls-v1", html)
         self.assertIn("createVideoPlayer", script)
         self.assertIn("preview-video-controls", script)
         self.assertIn("video-seek", script)

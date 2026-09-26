@@ -10,6 +10,8 @@ from pathlib import Path
 
 APP_PATH = Path.home() / "Applications" / "Gateway Dashboard.app"
 DOCK_PLIST = Path.home() / "Library" / "Preferences" / "com.apple.dock.plist"
+LEGACY_LABELS = {"PC Drive Dashboard"}
+LEGACY_APP_NAMES = {"PC Drive Dashboard.app"}
 
 
 def main() -> None:
@@ -28,9 +30,16 @@ def main() -> None:
 
     filtered = []
     for item in apps:
-        file_data = item.get("tile-data", {}).get("file-data", {})
-        if file_data.get("_CFURLString") != app_url and item.get("tile-data", {}).get("file-label") != label:
-            filtered.append(item)
+        tile_data = item.get("tile-data", {})
+        file_data = tile_data.get("file-data", {})
+        file_url = file_data.get("_CFURLString", "")
+        file_label = tile_data.get("file-label")
+        file_name = file_url.rstrip("/").split("/")[-1].replace("%20", " ")
+        if file_url == app_url or file_label == label:
+            continue
+        if file_label in LEGACY_LABELS or file_name in LEGACY_APP_NAMES:
+            continue
+        filtered.append(item)
 
     filtered.append(
         {

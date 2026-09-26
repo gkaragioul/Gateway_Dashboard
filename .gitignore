@@ -25,3 +25,5 @@ data/
 *.crt
 .env
 .env.*
+# Generated per machine by scripts/install_windows_startup_task.ps1 (contains local paths and bind address).
+scripts/run_windows_dashboard_hidden.vbs

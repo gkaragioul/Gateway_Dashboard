@@ -1,6 +1,9 @@
 import os
 import mimetypes
+import shutil
 import subprocess
+import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, BinaryIO
 from uuid import uuid4
@@ -18,6 +21,22 @@ class UploadConflictError(FileExistsError):
 
 class UploadNameError(ValueError):
     """Raised when an upload filename is unsafe for Windows."""
+
+
+class FileOperationConflictError(FileExistsError):
+    """Raised when a file operation would overwrite an existing item."""
+
+
+class FileOperationSafetyError(ValueError):
+    """Raised when a file operation targets an unsafe location."""
+
+
+@dataclass(frozen=True)
+class PreparedDownload:
+    path: Path
+    filename: str
+    media_type: str
+    cleanup: bool = False
 
 
 UPLOAD_CHUNK_SIZE = 1024 * 1024
@@ -219,6 +238,125 @@ def open_in_explorer(raw_path: str) -> None:
     if not target.exists():
         raise FileNotFoundError(path)
     subprocess.Popen(["explorer.exe", path])
+
+
+def paste_item(raw_source_path: str, raw_destination_folder_path: str, operation: str) -> dict[str, Any]:
+    source_path = normalize_windows_path(raw_source_path)
+    destination_folder_path = normalize_windows_path(raw_destination_folder_path)
+    normalized_operation = str(operation or "").strip().lower()
+    if normalized_operation not in {"copy", "cut"}:
+        raise FileOperationSafetyError("Paste operation must be copy or cut.")
+
+    _require_windows()
+    source = Path(source_path)
+    destination_folder = Path(destination_folder_path)
+    if _is_drive_root(source_path):
+        raise FileOperationSafetyError("Drive roots cannot be copied or moved.")
+    if not source.exists():
+        raise FileNotFoundError(source_path)
+    if not destination_folder.exists():
+        raise FileNotFoundError(destination_folder_path)
+    if not destination_folder.is_dir():
+        raise NotADirectoryError(destination_folder_path)
+
+    if source.is_dir():
+        _reject_folder_into_itself(source, destination_folder)
+
+    destination = destination_folder / source.name
+    if destination.exists():
+        raise FileOperationConflictError(str(destination))
+
+    if normalized_operation == "copy":
+        if source.is_dir():
+            shutil.copytree(source, destination, symlinks=True)
+        else:
+            shutil.copy2(source, destination)
+    else:
+        shutil.move(str(source), str(destination))
+
+    return {
+        "operation": normalized_operation,
+        "path": normalize_windows_path(str(destination)),
+        "name": destination.name,
+        "kind": "folder" if destination.is_dir() else "file",
+    }
+
+
+def delete_item(raw_path: str) -> dict[str, Any]:
+    path = normalize_windows_path(raw_path)
+    _require_windows()
+    if _is_drive_root(path):
+        raise FileOperationSafetyError("Drive roots cannot be deleted.")
+
+    target = Path(path)
+    if not target.exists():
+        raise FileNotFoundError(path)
+
+    was_dir = target.is_dir()
+    if was_dir:
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+    return {
+        "operation": "delete",
+        "path": path,
+        "name": target.name,
+        "kind": "folder" if was_dir else "file",
+    }
+
+
+def prepare_download(raw_path: str, archive_dir: Path) -> PreparedDownload:
+    path = normalize_windows_path(raw_path)
+    _require_windows()
+    target = Path(path)
+    if not target.exists():
+        raise FileNotFoundError(path)
+
+    if target.is_file():
+        return PreparedDownload(
+            path=target,
+            filename=target.name,
+            media_type=preview_media_type(path),
+            cleanup=False,
+        )
+
+    if not target.is_dir():
+        raise FileNotFoundError(path)
+
+    archive_dir.mkdir(parents=True, exist_ok=True)
+    basename = _download_basename(target)
+    archive_path = archive_dir / f"{basename}-{uuid4().hex}.zip"
+    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for child in target.rglob("*"):
+            if child.is_dir():
+                continue
+            archive.write(child, child.relative_to(target).as_posix())
+
+    return PreparedDownload(
+        path=archive_path,
+        filename=f"{basename}.zip",
+        media_type="application/zip",
+        cleanup=True,
+    )
+
+
+def _download_basename(target: Path) -> str:
+    name = target.name or target.anchor.replace(":\\", "-drive").replace(":", "-drive")
+    cleaned = "".join("-" if char in WINDOWS_FORBIDDEN_FILENAME_CHARS or ord(char) < 32 else char for char in name).strip(" .")
+    return cleaned or "download"
+
+
+def _is_drive_root(path: str) -> bool:
+    return len(path) == 3 and path[1:] == ":\\"
+
+
+def _reject_folder_into_itself(source: Path, destination_folder: Path) -> None:
+    try:
+        destination_folder.resolve().relative_to(source.resolve())
+    except ValueError:
+        return
+    raise FileOperationSafetyError("Folders cannot be pasted into themselves or their descendants.")
 
 
 def upload_file_to_folder(raw_folder_path: str, raw_filename: str, source: BinaryIO) -> dict[str, Any]:
