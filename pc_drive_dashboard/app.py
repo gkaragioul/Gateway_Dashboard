@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import __version__
 from .audit_log import AuditLog
 from .drives import list_drives
 from .filesystem import (
@@ -62,7 +63,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     resolved_settings.ensure_dirs()
     store = SecurityStore(resolved_settings.config_path)
     audit = AuditLog(resolved_settings.log_dir)
-    app = FastAPI(title="Gateway Dashboard", version="0.9.5")
+    app = FastAPI(title="Gateway Dashboard", version=__version__)
     static_dir = Path(__file__).parent / "static"
     config_dir = resolved_settings.config_path.parent
     login_limiter = LoginRateLimiter()
