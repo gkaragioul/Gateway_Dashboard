@@ -20,7 +20,10 @@ Gateway Dashboard is a self-hosted browser dashboard for browsing a Windows stor
 Gateway Dashboard gives whoever logs in a lot of power over the PC it runs on. Please read this before installing it.
 
 - **The password unlocks the whole PC, not one folder.** Anyone who logs in can browse and download every file on every drive that the Windows account running the dashboard can read: documents, photos, browser data, SSH keys, other programs' settings.
-- **Uploads can go into any folder that account can write to**, including folders such as Windows Startup. Uploads never overwrite or delete existing files. To make the dashboard read-only, start it with `PCDD_ENABLE_WRITES=0`.
+- **Anyone who logs in can also change files** in every folder that account can write to: upload files (including into folders such as Windows Startup), copy and move files and folders, and delete them.
+- **Delete is permanent.** Deleted files and folders do **not** go to the Recycle Bin and cannot be undone; the dashboard asks for confirmation first. Deleting a link or junction removes only the link, never what it points to.
+- **Built-in limits:** uploads, copies and moves never overwrite an existing file or folder. Drive roots (such as `D:\`) cannot be deleted, moved or downloaded as a whole, and the dashboard's own folders (and folders containing them) cannot be deleted or moved.
+- **Read-only mode:** start the dashboard with `PCDD_ENABLE_WRITES=0` to turn off upload, copy, move and delete. Browsing, previews, downloads and "Open on PC" keep working.
 - **"Open on PC" runs files on the PC.** It opens the chosen item with its default Windows program, exactly like double-clicking it there. For programs and scripts (`.exe`, `.bat`, `.cmd`, ...) that means they run. Together with uploads, anyone who has the password can run their own programs on the PC.
 - **Treat the dashboard password like the PC's own password**: long, unique, and never shared.
 - **Traffic is plain HTTP; the dashboard does not encrypt it.** Use it only on the PC itself, on a trusted home network, or through a VPN such as Tailscale (which encrypts the connection). **Never port-forward it on your router, never put it behind a public tunnel (ngrok, Cloudflare Tunnel, Tailscale Funnel and similar), and never expose it to the internet.** Do not use `--allow-public-bind` on shared or public Wi-Fi.
@@ -37,7 +40,9 @@ Gateway Dashboard gives whoever logs in a lot of power over the PC it runs on. P
 - Windows drive overview cards.
 - Fast folder explorer with single-click folder navigation.
 - Desktop quick shortcut for browsing and uploading to the Windows Desktop.
-- Folder uploads from the browser into the selected Windows folder.
+- Folder uploads from the browser into the selected Windows folder, with a progress panel.
+- Download files, or folders as a zip, to the device you are browsing from.
+- Copy, move (cut and paste) and permanently delete files and folders from the right-click menu.
 - Dashboard previews for images, video, audio, PDF, and text files.
 - Preview-window actions menu for copy/open workflows.
 - Right-click file and folder actions.
@@ -135,11 +140,12 @@ G:\Tools\GatewayDashboard\config\config.json
 G:\Tools\GatewayDashboard\config\setup-code.txt   (only until the first password is set)
 G:\Tools\GatewayDashboard\logs\dashboard.jsonl
 G:\Tools\GatewayDashboard\data
+G:\Tools\GatewayDashboard\data\downloads          (temporary zips for folder downloads)
 ```
 
 Without `PCDD_HOME`, Windows always uses `G:\Tools\GatewayDashboard`; other systems use `~/.gateway-dashboard`.
 
-Uploads are on by default. Set `PCDD_ENABLE_WRITES=0` (or `false`, `no`, `off`) to make the dashboard read-only: uploads are then refused.
+File changes are on by default. Set `PCDD_ENABLE_WRITES=0` (or `false`, `no`, `off`) to make the dashboard read-only: upload, copy, move and delete are then refused.
 
 ## Security Notes
 
@@ -149,6 +155,9 @@ See [Security: read this first](#security-read-this-first). In addition:
 - The app stores salted PBKDF2 password hashes, not raw passwords, and only hashes of browser session tokens.
 - File browsing and preview routes are intended for trusted personal/admin use on systems you own or administer.
 - Uploads write files to the selected folder, reject unsafe Windows filenames, and do not overwrite existing files.
+- Copy and move refuse to overwrite an existing item or to put a folder inside itself. Moves between drives copy first and remove the original only after the copy has finished.
+- Delete is permanent (no Recycle Bin), needs an explicit confirmation, refuses drive roots and the dashboard's own folders, and never follows links or junctions.
+- Folder downloads are zipped in the dashboard's `data\downloads` folder first and removed after sending; leftovers older than 6 hours are cleared on the next folder download. They skip links and junctions, and are refused for whole drives or when the drive holding that folder would be left with less than 1 GB free.
 - Gateway Dashboard is independent software and is not affiliated with, endorsed by, or sponsored by Tailscale.
 
 ## Development
@@ -166,6 +175,13 @@ Generate/update macOS icon assets:
 
 ```bash
 python scripts/generate_icon.py
+```
+
+Optional macOS Dock launcher (opens the dashboard's address in the browser; the address is required):
+
+```bash
+scripts/install_macos_launcher.sh http://<your-pc-tailscale-ip>:8787
+python3 scripts/add_to_dock.py
 ```
 
 ## License
