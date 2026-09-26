@@ -24,9 +24,17 @@ from .filesystem import (
     preview_media_type,
     upload_file_to_folder,
 )
+from .login_limiter import LoginRateLimiter
 from .path_utils import PathError
 from .security import SecurityStore
 from .settings import AppSettings
+from .setup_code import (
+    clear_setup_code,
+    is_local_request,
+    load_or_create_setup_code,
+    setup_code_matches,
+    setup_code_path,
+)
 
 
 SESSION_COOKIE = "pcdd_session"
@@ -42,7 +50,7 @@ class LoginRequest(BaseModel):
 
 
 class SetupRequest(LoginRequest):
-    pass
+    setup_code: str | None = None
 
 
 class PathRequest(BaseModel):
@@ -56,10 +64,18 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     audit = AuditLog(resolved_settings.log_dir)
     app = FastAPI(title="Gateway Dashboard", version="0.9.5")
     static_dir = Path(__file__).parent / "static"
+    config_dir = resolved_settings.config_path.parent
+    login_limiter = LoginRateLimiter()
 
     app.state.settings = resolved_settings
     app.state.security_store = store
     app.state.audit_log = audit
+    app.state.login_limiter = login_limiter
+
+    if store.is_configured():
+        clear_setup_code(config_dir)
+    else:
+        _announce_setup_code(load_or_create_setup_code(config_dir), setup_code_path(config_dir))
 
     async def require_auth(
         pcdd_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
@@ -89,12 +105,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     @app.get("/api/auth/state")
     async def auth_state(
+        request: Request,
         pcdd_session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
     ) -> dict[str, Any]:
         authenticated = store.verify_trusted_token(pcdd_session)
+        configured = store.is_configured()
         return {
-            "configured": store.is_configured(),
+            "configured": configured,
             "authenticated": authenticated,
+            "setup_requires_code": not configured and not _is_local(request),
             "hostname": socket.gethostname(),
             "platform": os.name,
         }
@@ -103,11 +122,19 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     async def setup(payload: SetupRequest, request: Request, response: Response) -> dict[str, Any]:
         if store.is_configured():
             raise HTTPException(status_code=409, detail="Password already configured.")
+        client = _client_host(request)
+        _refuse_if_locked_out(login_limiter, client)
+        local = _is_local(request)
+        if not local and not setup_code_matches(load_or_create_setup_code(config_dir), payload.setup_code):
+            _record_failed_attempt(login_limiter, audit, "auth.setup", client)
+            raise HTTPException(status_code=403, detail=_finish_setup_on_pc_message(request))
         try:
             store.set_password(payload.password)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        audit.record("auth.setup", "ok", client=request.client.host if request.client else None)
+        login_limiter.reset(client)
+        clear_setup_code(config_dir)
+        audit.record("auth.setup", "ok", client=client, method="local" if local else "setup_code")
         _issue_session(response, store, payload.device_name, payload.remember)
         return {"ok": True}
 
@@ -115,10 +142,16 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     async def login(payload: LoginRequest, request: Request, response: Response) -> dict[str, Any]:
         if not store.is_configured():
             raise HTTPException(status_code=428, detail="Password setup required.")
+        client = _client_host(request)
+        _refuse_if_locked_out(login_limiter, client)
         if not store.verify_password(payload.password):
-            audit.record("auth.login", "rejected", client=request.client.host if request.client else None)
-            raise HTTPException(status_code=401, detail="Wrong password.")
-        audit.record("auth.login", "ok", client=request.client.host if request.client else None)
+            locked_for = _record_failed_attempt(login_limiter, audit, "auth.login", client)
+            detail = "Wrong password."
+            if locked_for:
+                detail += f" Too many failed attempts from this device. Try again in {locked_for} seconds."
+            raise HTTPException(status_code=401, detail=detail)
+        login_limiter.reset(client)
+        audit.record("auth.login", "ok", client=client)
         _issue_session(response, store, payload.device_name, payload.remember)
         return {"ok": True}
 
@@ -265,6 +298,52 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
 
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
     return app
+
+
+def _client_host(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _is_local(request: Request) -> bool:
+    return is_local_request(request.client.host if request.client else None, request.url.hostname)
+
+
+def _refuse_if_locked_out(limiter: LoginRateLimiter, client: str) -> None:
+    wait = limiter.retry_after(client)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many failed attempts from this device. Try again in {wait} seconds.",
+            headers={"Retry-After": str(wait)},
+        )
+
+
+def _record_failed_attempt(limiter: LoginRateLimiter, audit: AuditLog, event: str, client: str) -> int:
+    locked_for = limiter.record_failure(client)
+    audit.record(event, "rejected", client=client)
+    if locked_for:
+        # Only the start of a lockout is logged; refused attempts during it are not, so a flood cannot fill the disk.
+        audit.record(event, "locked_out", client=client, seconds=locked_for)
+    return locked_for
+
+
+def _finish_setup_on_pc_message(request: Request) -> str:
+    port = request.url.port or (request.scope.get("server") or (None, 8787))[1]
+    return (
+        "Finish setup on the PC. Enter the one-time setup code from setup-code.txt in the dashboard's "
+        "config folder on the PC (it is also printed in the server log). Or, if the dashboard listens on "
+        f"127.0.0.1, create the password in a browser on the PC itself at http://127.0.0.1:{port}."
+    )
+
+
+def _announce_setup_code(code: str, code_file: Path) -> None:
+    print(
+        "Gateway Dashboard: no password is set yet.\n"
+        f"  One-time setup code: {code}\n"
+        f"  (also saved in {code_file}; it is deleted once the password is set)\n"
+        "  Create the password in a browser on this PC, or enter this code when setting it up from another device.",
+        flush=True,
+    )
 
 
 def _issue_session(response: Response, store: SecurityStore, device_name: str, remember: bool) -> None:
