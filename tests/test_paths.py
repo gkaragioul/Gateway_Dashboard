@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from pc_drive_dashboard.filesystem import UploadNameError, common_locations, preview_media_type, sanitize_upload_filename
@@ -42,6 +43,7 @@ class PathUtilsTests(unittest.TestCase):
                 with self.assertRaises(UploadNameError):
                     sanitize_upload_filename(filename)
 
+    @unittest.skipIf(os.name == "nt", "On Windows the Desktop shortcut is expected.")
     def test_common_locations_are_empty_off_windows(self):
         self.assertEqual(common_locations(), [])
 
