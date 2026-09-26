@@ -44,6 +44,7 @@ async function boot() {
   const auth = await api("/api/auth/state");
   state.authenticated = auth.authenticated;
   state.configured = auth.configured;
+  state.setupRequiresCode = Boolean(auth.setup_requires_code);
   updateAuthView();
   if (state.authenticated) {
     await loadDashboard();
@@ -90,10 +91,15 @@ function bindEvents() {
 
 function updateAuthView() {
   const needsSetup = !state.configured;
+  const needsSetupCode = needsSetup && state.setupRequiresCode;
   $("authTitle").textContent = needsSetup ? "Create dashboard password" : "Login";
-  $("authCopy").textContent = needsSetup
-    ? "Set the first dashboard password. Only a salted hash is written to the PC config."
-    : "Enter the dashboard password for this browser session.";
+  $("authCopy").textContent = needsSetupCode
+    ? "Finish setup on the PC: enter the one-time setup code from setup-code.txt in the dashboard's config folder on the PC (also printed in the server log), or create the password in a browser on the PC itself."
+    : needsSetup
+      ? "Set the first dashboard password. Only a salted hash is written to the PC config."
+      : "Enter the dashboard password for this browser session.";
+  $("setupCodeField")?.classList.toggle("hidden", !needsSetupCode);
+  if ($("setupCodeInput")) $("setupCodeInput").required = needsSetupCode;
   $("authView").classList.toggle("hidden", state.authenticated);
   document.querySelectorAll(".view").forEach((view) => {
     const name = view.id.replace(/View$/, "");
@@ -108,18 +114,21 @@ async function handleAuth(event) {
   const password = $("passwordInput").value;
   const remember = $("rememberInput").checked;
   const path = state.configured ? "/api/auth/login" : "/api/auth/setup";
+  const payload = {
+    password,
+    remember,
+    device_name: navigator.userAgent.slice(0, 110) || "Browser",
+  };
+  if (!state.configured) payload.setup_code = $("setupCodeInput")?.value || "";
   try {
     await api(path, {
       method: "POST",
-      body: JSON.stringify({
-        password,
-        remember,
-        device_name: navigator.userAgent.slice(0, 110) || "Browser",
-      }),
+      body: JSON.stringify(payload),
     });
     state.authenticated = true;
     state.configured = true;
     $("passwordInput").value = "";
+    if ($("setupCodeInput")) $("setupCodeInput").value = "";
     updateAuthView();
     await loadDashboard();
   } catch (error) {

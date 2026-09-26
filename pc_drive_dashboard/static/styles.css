@@ -475,7 +475,8 @@ input:focus-visible {
   color: var(--muted);
 }
 
-.auth-panel input[type="password"] {
+.auth-panel input[type="password"],
+.auth-panel input[type="text"] {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--line);

@@ -1,3 +1,5 @@
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,14 +12,15 @@ class RouteSurfaceTests(unittest.TestCase):
     def test_production_surface_exposes_only_visible_product_actions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            app = create_app(
-                AppSettings(
-                    base_dir=root,
-                    config_path=root / "config" / "config.json",
-                    log_dir=root / "logs",
-                    data_dir=root / "data",
+            with contextlib.redirect_stdout(io.StringIO()):  # First start prints the one-time setup code.
+                app = create_app(
+                    AppSettings(
+                        base_dir=root,
+                        config_path=root / "config" / "config.json",
+                        log_dir=root / "logs",
+                        data_dir=root / "data",
+                    )
                 )
-            )
 
         paths = {route.path for route in app.routes}
 

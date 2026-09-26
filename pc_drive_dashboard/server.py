@@ -24,7 +24,15 @@ def main() -> None:
             "Missing dependency 'uvicorn'. Install with: python -m pip install -r requirements.txt"
         ) from exc
 
-    uvicorn.run("pc_drive_dashboard.app:create_app", factory=True, host=host, port=args.port)
+    # proxy_headers=False: never take the client address from X-Forwarded-For, so the login
+    # lockout and the "setup only from this PC" check always see the real connecting address.
+    uvicorn.run(
+        "pc_drive_dashboard.app:create_app",
+        factory=True,
+        host=host,
+        port=args.port,
+        proxy_headers=False,
+    )
 
 
 def tailscale_ipv4() -> str | None:
