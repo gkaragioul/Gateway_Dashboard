@@ -259,6 +259,12 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         token: Annotated[str, Depends(require_csrf)],
     ) -> dict[str, Any]:
         try:
+            if not resolved_settings.write_operations_enabled:
+                audit.record("filesystem.upload", "disabled", path=path, filename=file.filename)
+                raise HTTPException(
+                    status_code=403,
+                    detail="Uploads are turned off on this PC (PCDD_ENABLE_WRITES=0).",
+                )
             result = upload_file_to_folder(path, file.filename or "", file.file)
         except PathError as exc:
             audit.record("filesystem.upload", "rejected", path=path, filename=file.filename, reason=str(exc))

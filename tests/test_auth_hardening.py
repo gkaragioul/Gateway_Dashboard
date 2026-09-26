@@ -141,6 +141,19 @@ class ServerLaunchTests(unittest.TestCase):
         self.assertIs(run.call_args.kwargs["proxy_headers"], False)
 
 
+class WriteSwitchTests(unittest.TestCase):
+    def test_uploads_stay_enabled_unless_explicitly_turned_off(self):
+        for value, expected in ((None, True), ("", True), ("1", True), ("0", False), ("false", False), ("OFF", False)):
+            with self.subTest(value=value):
+                env = {key: item for key, item in os.environ.items() if key != "PCDD_ENABLE_WRITES"}
+                if value is not None:
+                    env["PCDD_ENABLE_WRITES"] = value
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    env["PCDD_HOME"] = temp_dir
+                    with mock.patch.dict(os.environ, env, clear=True):
+                        self.assertEqual(AppSettings.from_env().write_operations_enabled, expected)
+
+
 @unittest.skipIf(TestClient is None, "API tests need httpx: python -m pip install httpx")
 class FirstRunAndLoginApiTests(unittest.TestCase):
     def setUp(self):
@@ -297,6 +310,43 @@ class FirstRunAndLoginApiTests(unittest.TestCase):
         for _ in range(4):
             self.assertEqual(client.post("/api/auth/login", json={"password": "wrong password!"}).status_code, 401)
         self.assertEqual(client.post("/api/auth/login", json={"password": PASSWORD}).status_code, 200)
+
+    def test_uploads_refused_when_writes_turned_off(self):
+        app = self.make_app(write_operations_enabled=False)
+        client = self.local(app)
+        client.post("/api/auth/setup", json=self.setup_payload())
+        target = self.root / "upload-target"
+        target.mkdir()
+
+        response = client.post(
+            "/api/upload",
+            data={"path": str(target)},
+            files={"file": ("hello.txt", b"hello")},
+            headers={"X-CSRF-Token": client.cookies["pcdd_csrf"]},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("PCDD_ENABLE_WRITES=0", response.json()["detail"])
+        self.assertFalse((target / "hello.txt").exists())
+
+    def test_uploads_still_work_by_default(self):
+        app = self.make_app()
+        client = self.local(app)
+        client.post("/api/auth/setup", json=self.setup_payload())
+        target = self.root / "upload-target"
+        target.mkdir()
+
+        response = client.post(
+            "/api/upload",
+            data={"path": str(target)},
+            files={"file": ("hello.txt", b"hello")},
+            headers={"X-CSRF-Token": client.cookies["pcdd_csrf"]},
+        )
+
+        self.assertNotEqual(response.status_code, 403)
+        if os.name == "nt":  # Filesystem routes only run on Windows.
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual((target / "hello.txt").read_bytes(), b"hello")
 
 
 if __name__ == "__main__":

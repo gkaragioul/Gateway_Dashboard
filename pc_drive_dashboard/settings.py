@@ -9,7 +9,8 @@ class AppSettings:
     config_path: Path
     log_dir: Path
     data_dir: Path
-    write_operations_enabled: bool = False
+    # Uploads have always been on; PCDD_ENABLE_WRITES=0 turns them off (read-only dashboard).
+    write_operations_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -29,10 +30,17 @@ class AppSettings:
             config_path=config_dir / "config.json",
             log_dir=log_dir,
             data_dir=data_dir,
-            write_operations_enabled=os.environ.get("PCDD_ENABLE_WRITES") == "1",
+            write_operations_enabled=_env_flag("PCDD_ENABLE_WRITES", default=True),
         )
 
     def ensure_dirs(self) -> None:
         self.config_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    if not value:
+        return default
+    return value not in {"0", "false", "no", "off"}
